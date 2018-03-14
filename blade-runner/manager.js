@@ -1,5 +1,6 @@
 fs = require('fs');
 const SMA = require('technicalindicators').SMA; // simple moving average
+const ADX = require('technicalindicators').ADX;
 const pairsArray = ['DSHBTC', 'ETHBTC', 'XMRBTC'];
 const BFXTrade = require('./BfxTrade');
 
@@ -8,6 +9,8 @@ var bfx = new BFXTrade();
 var pairs = {};
 
 const maPeriods = 20;
+const adxPeriods = 14; // default
+const trendStrength = 25;
 
 var openedPositions = 0;
 var success = 0;
@@ -20,6 +23,8 @@ function Manager(){
 			maValue: 0,
 			prevMaValue: 0,
 			prevClose: 0,
+			adx: new ADX({period: adxPeriods, close:[], high:[], low:[]}),
+			adxValue: 0,
 			long: false,
 			short: false,
 			stopLossPrice: 0,
@@ -49,19 +54,20 @@ Manager.prototype.runBot = function(){
 
 	// calculate MA for each pair simultaneously
 	for(i = 0; i < marketData[pairsArray[0]].length; i++){
-		for(pair in marketData){
-			calculateMA(pair, marketData[pair][i][2])
+		for (pair in marketData){
+			updateIndicators(pair, marketData[pair][i]);
 		}
 	}
 
 }
 
-function calculateMA(pair, close){
-	pairs[pair]['maValue'] = pairs[pair]['ma'].nextValue(close);
+function updateIndicators(pair, price){
+	pairs[pair]['maValue'] = pairs[pair]['ma'].nextValue(price[2]);
+	pairs[pair]['adxValue'] = pairs[pair]['adx'].nextValue({close: price[2], high: price[3], low: price[4]});
 	// console.log(pair, pairs[pair]['maValue']);
-	findTradeOpportunity(pair, close);
+	findTradeOpportunity(pair, price[2]);
 	pairs[pair]['prevMaValue'] = pairs[pair]['maValue'];
-	pairs[pair]['prevClose'] = close;
+	pairs[pair]['prevClose'] = price[2];
 }
 
 function findTradeOpportunity(pair, close){
@@ -70,7 +76,7 @@ function findTradeOpportunity(pair, close){
 	var maVal = pairs[pair]['maValue'];
 
 	if(!longVal && !shortVal){
-		if(pairs[pair]['prevClose'] < pairs[pair]['prevMaValue'] && close > maVal){
+		if(pairs[pair]['prevClose'] < pairs[pair]['prevMaValue'] && close > maVal && pairs[pair]['adxValue'] > trendStrength){
 			openLongPosition(pair, close);
 		} else if(pairs[pair]['prevClose'] > pairs[pair]['prevMaValue'] && close < maVal){
 			openShortPosition(pair, close);
