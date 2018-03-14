@@ -1,10 +1,17 @@
 fs = require('fs');
 const SMA = require('technicalindicators').SMA; // simple moving average
 const pairsArray = ['DSHBTC', 'ETHBTC', 'XMRBTC'];
+const BFXTrade = require('./BfxTrade');
+
+var bfx = new BFXTrade();
 
 var pairs = {};
 
 const maPeriods = 20;
+
+var openedPositions = 0;
+var success = 0;
+var loss = 0;
 
 function Manager(){
 	for(pair of pairsArray){
@@ -15,7 +22,9 @@ function Manager(){
 			prevClose: 0,
 			long: false,
 			short: false,
-			stopLossPrice: 0
+			stopLossPrice: 0,
+			entryAmount: 0,
+			entryPrice: 0
 		}
 	}
 }
@@ -59,6 +68,7 @@ function findTradeOpportunity(pair, close){
 	var longVal = pairs[pair]['long'];
 	var shortVal = pairs[pair]['short'];
 	var maVal = pairs[pair]['maValue'];
+
 	if(!longVal && !shortVal){
 		if(pairs[pair]['prevClose'] < pairs[pair]['prevMaValue'] && close > maVal){
 			openLongPosition(pair, close);
@@ -66,52 +76,86 @@ function findTradeOpportunity(pair, close){
 			openShortPosition(pair, close);
 		}
 	} else if(longVal){
-		if(close < maVal){
+		if(close < maVal && close > pairs[pair]['entryPrice'] * 1.004){
 			closeLongPosition(pair, close);
+			success++;
 		} else if(close < pairs[pair]['stopLossPrice']){
-			closeLongPosition(pair, close);
+			closeLongPosition(pair, pairs[pair]['stopLossPrice']); // close at stopLossPrice
+			loss++;
 		}
 	} else if(shortVal){
-		if(close > maVal){
+		if(close > maVal && close < pairs[pair]['entryPrice'] * 0.996){
+			success++;
 			closeLongPosition(pair, close);
 		} else if(close > pairs[pair]['stopLossPrice']){
-			closeShortPosition(pair, close);
+			loss++;
+			closeShortPosition(pair, pairs[pair]['stopLossPrice']); // close at stopLossPrice
 		}
 	}
 }
 
 function openLongPosition(pair, close){
 	pairs[pair]['stopLossPrice'] = close * 0.98;
-	pairs[pair]['long'] = true; // flag to open long position
-	console.log(pair, ' Opened long position at ', close);
-	console.log(pair, ' Stop loss price ', pairs[pair]['stopLossPrice']);
-	console.log('--------------------------------------------------------')
+	pairs[pair]['entryAmount'] = getPositionSize(close);
+	bfx.testTrade(pair, close, pairs[pair]['entryAmount'], 'buy', 'long', function(){
+		pairs[pair]['long'] = true; // flag to open long position
+		pairs[pair]['entryPrice'] =  close;
+		openedPositions++;
+		console.log(pair, ' Opened long position at ', close, ' amount ', pairs[pair]['entryAmount']);
+		console.log(pair, ' Stop loss price ', pairs[pair]['stopLossPrice']);
+		console.log(pair, ' Opened positions ', openedPositions);
+		console.log('--------------------------------------------------------');
+	});
 }
 
 function openShortPosition(pair, close){
 	pairs[pair]['stopLossPrice'] = close * 1.02;
-	pairs[pair]['short'] = true; // flag to open short position
-	console.log(pair, ' Opened short position at ', close)
-	console.log(pair, ' Stop loss price ', pairs[pair]['stopLossPrice']);
-	console.log('--------------------------------------------------------')
+	pairs[pair]['entryAmount'] = getPositionSize(close);
+	bfx.testTrade(pair, close, pairs[pair]['entryAmount'], 'sell', 'short', function(){
+		pairs[pair]['short'] = true; // flag to open short position
+		pairs[pair]['entryPrice'] =  close;
+		openedPositions++;
+		console.log(pair, ' Opened short position at ', close, ' amount ', pairs[pair]['entryAmount']);
+		console.log(pair, ' Stop loss price ', pairs[pair]['stopLossPrice']);
+		console.log(pair, ' Opened positions ', openedPositions);
+		console.log('--------------------------------------------------------');
+	});
 
 }
 
 function closeLongPosition(pair, close){
-	pairs[pair]['stopLossPrice'] = 0;
-	pairs[pair]['long'] = false; // flag to close long position
-	console.log(pair, ' Closed long position at ', close)
-	console.log('--------------------------------------------------------')
-
+	bfx.testTrade(pair, close, pairs[pair]['entryAmount'], 'sell', 'long', function(){
+		console.log(pair, ' Closed long position at ', close, ' amount ', pairs[pair]['entryAmount']);
+		console.log(pair, ' Result amount ', bfx.initAmount);
+		console.log(pair, ' Successful trades: ', success, ' Loss trades: ', loss);
+		console.log('--------------------------------------------------------');
+		pairs[pair]['stopLossPrice'] = 0;
+		pairs[pair]['entryAmount'] = 0; // reset entryAmount
+		pairs[pair]['entryPrice'] =  0; // reset entryPrice
+		pairs[pair]['long'] = false; // flag to close long position
+		openedPositions--;
+	});
 }
 
 function closeShortPosition(pair, close){
-	pairs[pair]['stopLossPrice'] = 0;
-	pairs[pair]['short'] = false; // flag to close short position
-	console.log(pair, ' Closed short position at ', close)
-	console.log('--------------------------------------------------------')
-
+	bfx.testTrade(pair, close, pairs[pair]['entryAmount'], 'buy', 'short', function(){
+		console.log(pair, ' Closed short position at ', close, ' amount ', pairs[pair]['entryAmount']);
+		console.log(pair, ' Result amount ', bfx.initAmount);
+		console.log(pair, ' Successful trades: ', success, ' Loss trades: ', loss);
+		console.log('--------------------------------------------------------');
+		pairs[pair]['stopLossPrice'] = 0;
+		pairs[pair]['entryAmount'] = 0; // reset entryAmount
+		pairs[pair]['entryPrice'] =  0; // reset entryPrice
+		pairs[pair]['short'] = false; // flag to close short position
+		openedPositions--;
+	});
 }
+
+function getPositionSize(close){
+	// 1/3rd of our initial amount is dedicated to each pair
+	return bfx.initAmount / (pairsArray.length - openedPositions) / close;
+}
+
 
 module.exports = Manager;
 
